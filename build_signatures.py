@@ -19,26 +19,55 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-ITEM_LIST_URL = "https://api.tibiadata.com/v4/items"
+WIKI_API = "https://tibia.fandom.com/api.php"
 WIKI_FILEPATH = "https://tibia.fandom.com/wiki/Special:FilePath/{}"
+WIKI_CATEGORY = "Category:Objects with Object IDs"
 
 OUT_FILE = Path("data/signatures.json")
 GRID_SIZE = 4          # signatur-upplösning för matchning
 THUMB_SIZE = 32         # visningsstorlek i UI
 
+HEADERS = {"User-Agent": "tibia-item-matcher/1.0 (personal fan project)"}
+
 
 def get_item_names() -> list[str]:
-    resp = requests.get(ITEM_LIST_URL, timeout=30)
-    resp.raise_for_status()
-    items = resp.json()["items"]["item_list"]
-    return sorted({item["name"] for item in items if item.get("name")})
+    """Hämtar alla sidtitlar i kategorin 'Objects with Object IDs' via MediaWiki-API:t.
+
+    TibiaData API har INGET items-endpoint (bara karaktärer/världar/highscores/etc),
+    så itemlistan måste hämtas direkt från TibiaWiki istället.
+    """
+    names = []
+    params = {
+        "action": "query",
+        "list": "categorymembers",
+        "cmtitle": WIKI_CATEGORY,
+        "cmlimit": "500",
+        "format": "json",
+    }
+    while True:
+        resp = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        for member in data.get("query", {}).get("categorymembers", []):
+            title = member["title"]
+            # Hoppa över eventuella undersidor/kategorisidor som inte är faktiska items
+            if ":" not in title:
+                names.append(title)
+
+        cont = data.get("continue", {}).get("cmcontinue")
+        if not cont:
+            break
+        params["cmcontinue"] = cont
+        time.sleep(0.2)
+
+    return sorted(set(names))
 
 
 def download_sprite(name: str) -> Image.Image | None:
     safe_name = name.replace(" ", "_")
     url = WIKI_FILEPATH.format(f"{safe_name}.gif")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code != 200 or not resp.content:
             return None
         return Image.open(io.BytesIO(resp.content)).convert("RGBA")
