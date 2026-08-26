@@ -1,0 +1,42 @@
+name: Build item database and deploy
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * 1"   # varje måndag natt — items ändras sällan
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests pillow
+
+      - name: Bygg signatures.json
+        run: python build_signatures.py
+
+      - name: Commita uppdaterad data (om ändrad)
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/signatures.json
+          git diff --cached --quiet || git commit -m "Uppdatera itemdatabas"
+          git push || true
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - uses: actions/deploy-pages@v4
