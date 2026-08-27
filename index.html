@@ -217,9 +217,19 @@ function imageToSignature(img, grid){
   canvas.width = grid; canvas.height = grid;
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
+  // Fyll svart innan vi ritar — matchar det svarta item-slottet i spelet
+  // och hur databasens signaturer nu byggs (se to_signature i build_signatures.py).
+  // Har query-bilden genomskinliga pixlar blir de svarta här också istället
+  // för att jämföras rått mot en alfakanal som inte finns med i signaturerna längre.
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, grid, grid);
   ctx.drawImage(img, 0, 0, grid, grid);
   const data = ctx.getImageData(0, 0, grid, grid).data;
-  return Array.from(data);
+  const rgb = [];
+  for(let i = 0; i < data.length; i += 4){
+    rgb.push(data[i], data[i + 1], data[i + 2]);
+  }
+  return rgb;
 }
 
 function distance(a, b){
