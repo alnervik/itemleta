@@ -133,10 +133,26 @@ def download_sprite(name: str, image_url: str | None) -> Image.Image | None:
 
 
 def to_signature(img: Image.Image, grid: int = GRID_SIZE) -> list[int]:
-    small = img.resize((grid, grid), Image.BOX)
+    """Komponerar spriten över svart bakgrund (som item-slottet i spelet ser ut)
+    innan nedskalning, och struntar sen i alfakanalen helt.
+
+    Sprites är genomskinliga PNG/GIF med mycket padding runt själva ikonen.
+    Skalar man ner den råa RGBA-bilden direkt slår PIL ihop RGB och alfa var
+    för sig (inte premultiplicerat), så genomskinliga pixlar — som ofta har
+    RGB (0,0,0) från GIF-konverteringen — färgar in kantpixlarna med svart
+    "skräpfärg" istället för att tona ut mot bakgrunden. Alfakanalen tas
+    dessutom med i jämförelsen på lika villkor som färg, så en helt
+    genomskinlig pixel (alfa 0) mäts som lika olik en helt opak pixel (alfa
+    255) som svart är olik vitt — vilket i praktiken dominerar hela
+    avståndet mot query-bilder som (liksom i spelet) har en solid svart
+    bakgrund istället för riktig genomskinlighet.
+    """
+    bg = Image.new("RGB", img.size, (0, 0, 0))
+    bg.paste(img, mask=img.split()[3])
+    small = bg.resize((grid, grid), Image.BOX)
     flat = []
-    for r, g, b, a in small.getdata():
-        flat.extend([r, g, b, a])
+    for r, g, b in small.getdata():
+        flat.extend([r, g, b])
     return flat
 
 
