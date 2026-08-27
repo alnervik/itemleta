@@ -21,7 +21,9 @@ from PIL import Image
 
 WIKI_API = "https://tibia.fandom.com/api.php"
 WIKI_FILEPATH = "https://tibia.fandom.com/wiki/Special:FilePath/{}"
-WIKI_CATEGORY = "Category:Objects with Object IDs"
+# Bara dessa kategorier tas med — matchningen begränsas medvetet till
+# utrustning, vapen och mat istället för alla items i spelet.
+WIKI_CATEGORIES = ["Category:Body Equipment", "Category:Weapons", "Category:Food"]
 
 OUT_FILE = Path("data/signatures.json")
 GRID_SIZE = 4          # signatur-upplösning för matchning
@@ -30,17 +32,22 @@ THUMB_SIZE = 32         # visningsstorlek i UI
 HEADERS = {"User-Agent": "tibia-item-matcher/1.0 (personal fan project)"}
 
 
-def get_item_names() -> list[str]:
-    """Hämtar alla sidtitlar i kategorin 'Objects with Object IDs' via MediaWiki-API:t.
+def _collect_category(cmtitle: str, seen_categories: set[str], names: set[str]) -> None:
+    """Hämtar sidtitlar i en kategori och går rekursivt in i eventuella underkategorier.
 
-    TibiaData API har INGET items-endpoint (bara karaktärer/världar/highscores/etc),
-    så itemlistan måste hämtas direkt från TibiaWiki istället.
+    'Category:Body Equipment' t.ex. innehåller inga items direkt, bara
+    underkategorier som Armors/Helmets/Boots/Shields/Amulets/Rings/Legs/
+    Spellbooks — så vi måste följa kategoriträdet nedåt istället för att
+    bara läsa av toppnivån.
     """
-    names = []
+    if cmtitle in seen_categories:
+        return
+    seen_categories.add(cmtitle)
+
     params = {
         "action": "query",
         "list": "categorymembers",
-        "cmtitle": WIKI_CATEGORY,
+        "cmtitle": cmtitle,
         "cmlimit": "500",
         "format": "json",
     }
@@ -50,9 +57,10 @@ def get_item_names() -> list[str]:
         data = resp.json()
         for member in data.get("query", {}).get("categorymembers", []):
             title = member["title"]
-            # Hoppa över eventuella undersidor/kategorisidor som inte är faktiska items
-            if ":" not in title:
-                names.append(title)
+            if member.get("ns") == 14:  # Category-namnrymden -> gräv djupare
+                _collect_category(title, seen_categories, names)
+            elif ":" not in title:
+                names.add(title)
 
         cont = data.get("continue", {}).get("cmcontinue")
         if not cont:
@@ -60,7 +68,18 @@ def get_item_names() -> list[str]:
         params["cmcontinue"] = cont
         time.sleep(0.2)
 
-    return sorted(set(names))
+
+def get_item_names() -> list[str]:
+    """Hämtar alla sidtitlar under WIKI_CATEGORIES (inkl. underkategorier) via MediaWiki-API:t.
+
+    TibiaData API har INGET items-endpoint (bara karaktärer/världar/highscores/etc),
+    så itemlistan måste hämtas direkt från TibiaWiki istället.
+    """
+    seen_categories: set[str] = set()
+    names: set[str] = set()
+    for category in WIKI_CATEGORIES:
+        _collect_category(category, seen_categories, names)
+    return sorted(names)
 
 
 def get_image_urls(names: list[str], batch_size: int = 50) -> dict[str, str]:
@@ -155,7 +174,7 @@ def main():
 
     # Säkerhetsspärr: om nästan allt misslyckades (t.ex. Fandom blockerar CI-IP:n)
     # ska vi INTE skriva över en fungerande databas med skräpdata.
-    MIN_EXPECTED = 500
+    MIN_EXPECTED = 300
     if len(entries) < MIN_EXPECTED:
         print(
             f"FEL: bara {len(entries)} items hämtades (minst {MIN_EXPECTED} förväntades). "
