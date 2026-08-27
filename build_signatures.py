@@ -63,15 +63,53 @@ def get_item_names() -> list[str]:
     return sorted(set(names))
 
 
-def download_sprite(name: str) -> Image.Image | None:
-    safe_name = name.replace(" ", "_")
-    url = WIKI_FILEPATH.format(f"{safe_name}.gif")
+def get_image_urls(names: list[str], batch_size: int = 50) -> dict[str, str]:
+    """Slår upp de riktiga CDN-adresserna för varje items bildfil via MediaWiki-API:t.
+
+    Vi undviker medvetet att hämta bilder direkt från Special:FilePath (som är en
+    omdirigeringssida på själva wiki-domänen) eftersom Fandoms Cloudflare-skydd
+    ofta blockerar den vägen för icke-webbläsarklienter. imageinfo-anropet ger oss
+    istället den slutgiltiga static.wikia.nocookie.net-adressen, som är statiska
+    filer utan samma bot-skydd.
+    """
+    urls: dict[str, str] = {}
+    for i in range(0, len(names), batch_size):
+        batch = names[i:i + batch_size]
+        titles = "|".join(f"File:{n.replace(' ', '_')}.gif" for n in batch)
+        params = {
+            "action": "query",
+            "titles": titles,
+            "prop": "imageinfo",
+            "iiprop": "url",
+            "format": "json",
+        }
+        resp = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        pages = resp.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            title = page.get("title", "")
+            info = page.get("imageinfo")
+            if not (title.startswith("File:") and title.endswith(".gif") and info):
+                continue
+            name = title[len("File:"):-len(".gif")].replace("_", " ")
+            urls[name] = info[0]["url"]
+        print(f"  slog upp {min(i + batch_size, len(names))}/{len(names)} bild-URL:er", flush=True)
+        time.sleep(0.3)
+    return urls
+
+
+def download_sprite(name: str, image_url: str | None) -> Image.Image | None:
+    if image_url is None:
+        print(f"    ingen bild hittades för: {name}", flush=True)
+        return None
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = requests.get(image_url, headers=HEADERS, timeout=15)
         if resp.status_code != 200 or not resp.content:
+            print(f"    miss ({resp.status_code}): {name}", flush=True)
             return None
         return Image.open(io.BytesIO(resp.content)).convert("RGBA")
-    except Exception:
+    except Exception as e:
+        print(f"    fel ({e}): {name}", flush=True)
         return None
 
 
@@ -91,13 +129,17 @@ def to_thumb_b64(img: Image.Image, size: int = THUMB_SIZE) -> str:
 
 
 def main():
-    print("Hämtar itemlista...")
+    print("Hämtar itemlista...", flush=True)
     names = get_item_names()
-    print(f"  {len(names)} items")
+    print(f"  {len(names)} items", flush=True)
+
+    print("Slår upp bild-URL:er...", flush=True)
+    image_urls = get_image_urls(names)
+    print(f"  {len(image_urls)}/{len(names)} bild-URL:er hittade", flush=True)
 
     entries = []
     for i, name in enumerate(names):
-        img = download_sprite(name)
+        img = download_sprite(name, image_urls.get(name))
         if img is None:
             continue
         entries.append({
@@ -105,9 +147,22 @@ def main():
             "sig": to_signature(img),
             "thumb": to_thumb_b64(img),
         })
-        if i % 100 == 0:
-            print(f"  {i}/{len(names)}")
-        time.sleep(0.15)  # var snäll mot wikin
+        if i % 25 == 0:
+            print(f"  {i}/{len(names)}  (hittills lyckade: {len(entries)})", flush=True)
+        time.sleep(0.1)
+
+    print(f"\nTotalt: {len(entries)}/{len(names)} sprites hämtade.", flush=True)
+
+    # Säkerhetsspärr: om nästan allt misslyckades (t.ex. Fandom blockerar CI-IP:n)
+    # ska vi INTE skriva över en fungerande databas med skräpdata.
+    MIN_EXPECTED = 500
+    if len(entries) < MIN_EXPECTED:
+        print(
+            f"FEL: bara {len(entries)} items hämtades (minst {MIN_EXPECTED} förväntades). "
+            "Avbryter utan att skriva/committa — troligen blockerad av Fandom. "
+            "Se statuskoderna ovan (403 = blockerad, 404 = fel filnamn/format)."
+        )
+        raise SystemExit(1)
 
     OUT_FILE.parent.mkdir(exist_ok=True)
     OUT_FILE.write_text(
