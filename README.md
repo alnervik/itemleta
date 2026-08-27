@@ -15,7 +15,14 @@ Drar in en extremt pixlad bild på ett Tibia-item och gissar vad det föreställ
 
 Filen innehåller bara de två exempelbilder du testade i chatten, så du kan
 öppna `index.html` lokalt direkt och se att matchningen fungerar innan du
-kör hela bygget mot alla items.
+kör hela bygget.
+
+## Vilka items ingår
+
+Databasen byggs bara från TibiaWiki-kategorierna `Body Equipment`, `Weapons`
+och `Food` (se `WIKI_CATEGORIES` i `build_signatures.py`), inte alla items i
+spelet. Lägg till fler kategorinamn i listan och kör om workflowet för att
+utöka urvalet.
 
 ## Justera träffsäkerhet
 
