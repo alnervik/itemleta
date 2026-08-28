@@ -116,6 +116,24 @@
   }
   #status.error{ color: var(--danger); }
 
+  #count-row{
+    display:none;
+    align-items:center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #count-row.show{ display:flex; }
+  #count-select{
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+
   #results{
     width: min(90vw, 560px);
     margin-top: 30px;
@@ -188,6 +206,16 @@
 </div>
 
 <div id="status"></div>
+<div id="count-row">
+  <label for="count-select">Antal förslag:</label>
+  <select id="count-select">
+    <option value="10">10</option>
+    <option value="20">20</option>
+    <option value="50">50</option>
+    <option value="100">100</option>
+    <option value="all">Alla</option>
+  </select>
+</div>
 <div id="results"></div>
 
 <footer>
@@ -198,6 +226,7 @@
 
 <script>
 let DB = null;
+let lastScored = null;
 
 async function loadDB(){
   const statusEl = document.getElementById('status');
@@ -258,6 +287,20 @@ function renderResults(matches){
   });
 }
 
+function getSelectedCount(){
+  const val = document.getElementById('count-select').value;
+  return val === 'all' ? Infinity : parseInt(val, 10);
+}
+
+function showMatches(){
+  if(!lastScored) return;
+  const statusEl = document.getElementById('status');
+  const count = getSelectedCount();
+  const shown = Math.min(count, lastScored.length);
+  statusEl.textContent = `Bästa gissningarna (${shown} av ${lastScored.length} items):`;
+  renderResults(lastScored.slice(0, count));
+}
+
 function handleFile(file){
   const statusEl = document.getElementById('status');
   statusEl.classList.remove('error');
@@ -270,6 +313,7 @@ function handleFile(file){
       document.getElementById('preview').src = e.target.result;
       document.getElementById('preview-row').classList.add('show');
       document.getElementById('dropzone').style.display = 'none';
+      document.getElementById('count-row').classList.add('show');
 
       const sig = imageToSignature(img, DB.grid);
       const scored = DB.items.map(item => ({
@@ -278,9 +322,9 @@ function handleFile(file){
         score: distance(sig, item.sig)
       }));
       scored.sort((a, b) => a.score - b.score);
+      lastScored = scored;
 
-      statusEl.textContent = `Bästa gissningarna (av ${DB.items.length} items):`;
-      renderResults(scored.slice(0, 10));
+      showMatches();
     };
     img.src = e.target.result;
   };
@@ -305,12 +349,16 @@ dropzone.addEventListener('drop', e => {
   if(file) handleFile(file);
 });
 
+document.getElementById('count-select').addEventListener('change', showMatches);
+
 document.getElementById('reset-btn').addEventListener('click', () => {
   document.getElementById('preview-row').classList.remove('show');
+  document.getElementById('count-row').classList.remove('show');
   document.getElementById('dropzone').style.display = 'flex';
   document.getElementById('results').innerHTML = '';
   document.getElementById('status').textContent = '';
   fileInput.value = '';
+  lastScored = null;
 });
 </script>
 
